@@ -25,6 +25,8 @@ import time
 from DataHandling import DataHandling
 from FeatureProcessing import *
 import itertools
+import matplotlib.pyplot as plt
+import cv2
 
 class Classifier:
     
@@ -41,6 +43,7 @@ class Classifier:
         self.SetClassifierType()
         self.featureProcressing = None 
         self.classificationIsPossible = False
+        self.scaler = None
 
     def SetRandomCVClassifier(self):
         if(self.classifierType == "LinearSVC"):
@@ -58,7 +61,6 @@ class Classifier:
     def SetClassifierType(self):
         if(self.classifierType == "LinearSVC"):
             self.classifier = LinearSVC()
-            parametersRandom = {'C': scipy.stats.expon(scale=100) }
         elif(self.classifierType == "SVC RBF"):
             self.classifier = SVC(kernel="rbf", C=1000, gamma=10)
         elif(self.classifierType == "SVC Poly"):
@@ -77,17 +79,16 @@ class Classifier:
             self.classifier = AdaBoostClassifier(learning_rate=0.01)
 
             
-    def SetTrainingAndTestData(self, hogParameters, colorParameters, spatialParameters, colorSpace, reprocess=False, storeData =True):
+    def SetTrainingAndTestData(self, reprocess=False, storeData =True):
         if(reprocess):
-            featureProcessing = FeatureProcessing(hogParameters, colorParameters, spatialParameters, colorSpace = colorSpace)
-            features, labels = featureProcessing.ComputeAllFeaturesAndLabels(storeData)
+            features, labels, self.scaler = self.featureProcessing.ComputeAllFeaturesAndLabels(storeData)
             random = 0
         else:
             random = np.random.randint(0,100)
-            features, labels = self.data.LoadPreProcessedData()
+            features, labels, self.scaler = self.data.LoadPreProcessedData()
             features, labels = shuffle(features, labels, random_state= random)
 
-        self.trainingFeatures, self.testFeatures, self.trainingLabels, self.testLabels = train_test_split(features, labels, test_size=0.2, random_state=1675637+random)
+        self.trainingFeatures, self.testFeatures, self.trainingLabels, self.testLabels = train_test_split(features, labels, test_size=0.5, random_state=1675637+random)
         
     
     def TrainClassifier(self):
@@ -95,7 +96,8 @@ class Classifier:
         self.classifier.fit(self.trainingFeatures, self.trainingLabels)
         end = time.time()
         print ('Time to train classifier ' + self.classifierType + " [s]: ", round(end-start,2))
-    
+
+
     
     def TestClassifier(self, details =True):
         #someLabels = self.classifier.decision_function(self.testFeatures)
@@ -103,6 +105,18 @@ class Classifier:
         predictedLabelsTraining = self.classifier.predict(self.trainingFeatures)
         print('Training accuracy score of classifier in % = ', round(accuracy_score(self.trainingLabels, predictedLabelsTraining), 8)*100)
         print('Test accuracy score of classifier in % = ', round(accuracy_score(self.testLabels, predictedLabels), 8)*100)
+        """
+        print('Training accuracy score of classifier in % = ', round(self.classifier.score(self.trainingFeatures, self.trainingLabels), 8))
+        print('Test accuracy score of classifier in % = ', round(self.classifier.score(self.testFeatures, self.testLabels), 8))
+        imagePathes = self.data.GetNonCarData()
+        for i in range(0,10):
+            index = np.random.randint(0,len(imagePathes))
+            image = cv2.imread(imagePathes[index])
+            print (self.UseClassifier(image))
+            cv2.imshow('title',image)
+            if cv2.waitKey(500000) & 0xFF == ord('q'):
+                x=1
+        """
         if(details ==True):
             print('Precision, recall, F-Score () = ', precision_recall_fscore_support(self.testLabels, predictedLabels))
             print("Best parameters: ", self.classifier.best_params_)
@@ -110,13 +124,16 @@ class Classifier:
             #print("Estimator: ", self.classifier.best_estimator_)
             #print("Cross validation results: ", self.classifier.cv_results_)
 
-    def SetFeatureProcessing(self, hogParameters, colorParameters, spatialParameters, colorSpace = colorSpace):
+    def SetFeatureProcessingParameters(self, hogParameters, colorParameters, spatialParameters, colorSpace):
         self.featureProcessing = FeatureProcessing(hogParameters, colorParameters, spatialParameters, colorSpace = colorSpace)
-        self.classificationIsPossible = True
+        
         
     def UseClassifier(self, image):
-        assert(self.classificationIsPossible == True, "Call 'SetFeatureProcessing' first")
-        features = self.featureProcessing.Apply(image)
+        self.trainingFeatures = None
+        self.testFeatures = None
+        self.trainingLabels = None
+        self.testLabels = None
+        features = self.featureProcessing.Apply(image, self.scaler)
         label = self.classifier.predict(features)
         return label
 
@@ -127,34 +144,15 @@ def UseClassifier():
     myHogParameters = HogParameters(isOn = True, orientationsCount = 72, pixelsPerCell = (16,16), cellsPerBlock = (4,4), visualize = False, channel = 'ALL')
     myColorParameters = ColorParameters(isOn = True, binCount = 128)
     mySpatialParameters = SpatialParameters(isOn =True, spatialSize = (8,8))
-    classifierList = "LinearSVC"
-    classifier = Classifier(classifier)
-    classifier.SetRandomCVClassifier()
-    classifier.SetTrainingAndTestData(myHogParameters, myColorParameters, mySpatialParameters, myColorSpace, False)
+    classifierType = "LinearSVC"
+    classifier = Classifier(classifierType)
+    classifier.SetFeatureProcessingParameters(myHogParameters, myColorParameters, mySpatialParameters, myColorSpace)
+    classifier.SetTrainingAndTestData(False)
     classifier.TrainClassifier()
     classifier.SetFeatureProcessing(myHogParameters, myColorParameters, mySpatialParameters, myColorSpace)
-    classfiere
 
 
 def OptimizeClassifiers():
-    myColorSpace = "LUV"
-    myHogParameters = HogParameters(isOn = True, orientationsCount = 72, pixelsPerCell = (16,16), cellsPerBlock = (4,4), visualize = False, channel = 'ALL')
-    myColorParameters = ColorParameters(isOn = True, binCount = 128)
-    mySpatialParameters = SpatialParameters(isOn =True, spatialSize = (8,8))
-    #classifierList = ["LinearSVC",  "RandomForest",  "DecisionTree", "NearestNeighbor", "NaiveBayes", "AdaBoost", "SVC RBF", "SVC Poly", "SVC Sig"]
-    #classifierList = ["LinearSVC", "SVC RBF", "RandomForest"]
-    classifierList = ["LinearSVC", "RandomForest"]
-    for classifier in classifierList:
-        print("------------------------")
-        classifier = Classifier(classifier)
-        classifier.SetRandomCVClassifier()
-        classifier.SetTrainingAndTestData(myHogParameters, myColorParameters, mySpatialParameters, myColorSpace, False)
-        classifier.TrainClassifier()
-        classifier.TestClassifier(True)      
-        print("------------------------")  
-
-
-def ExploreClassifiers():
     myColorSpace = "LUV"
     myHogParameters = HogParameters(isOn = True, orientationsCount = 72, pixelsPerCell = (16,16), cellsPerBlock = (4,4), visualize = False, channel = 'ALL')
     myColorParameters = ColorParameters(isOn = True, binCount = 128)
@@ -165,7 +163,27 @@ def ExploreClassifiers():
     for classifier in classifierList:
         print("------------------------")
         classifier = Classifier(classifier)
-        classifier.SetTrainingAndTestData(myHogParameters, myColorParameters, mySpatialParameters, myColorSpace, False)
+        classifier.SetRandomCVClassifier()
+        classifier.SetFeatureProcessingParameters(myHogParameters, myColorParameters, mySpatialParameters, myColorSpace)
+        classifier.SetTrainingAndTestData(False)
+        classifier.TrainClassifier()
+        classifier.TestClassifier(True)      
+        print("------------------------")  
+
+
+def ExploreClassifiers():
+    myColorSpace = "LUV"
+    myHogParameters = HogParameters(isOn = True, orientationsCount = 16, pixelsPerCell = (16,16), cellsPerBlock = (4,4), visualize = False, channel = 'ALL')
+    myColorParameters = ColorParameters(isOn = True, binCount = 128)
+    mySpatialParameters = SpatialParameters(isOn =True, spatialSize = (24,24))
+    #classifierList = ["LinearSVC",  "RandomForest",  "DecisionTree", "NearestNeighbor", "NaiveBayes", "AdaBoost", "SVC RBF", "SVC Poly", "SVC Sig"]
+    #classifierList = ["LinearSVC", "SVC RBF", "RandomForest"]
+    classifierList = ["LinearSVC"]
+    for classifier in classifierList:
+        print("------------------------")
+        classifier = Classifier(classifier)
+        classifier.SetFeatureProcessingParameters(myHogParameters, myColorParameters, mySpatialParameters, myColorSpace)
+        classifier.SetTrainingAndTestData(True)
         classifier.TrainClassifier()
         classifier.TestClassifier(False)      
         print("------------------------")  
@@ -203,9 +221,10 @@ def ExploreFeatureProcessing():
     
                     print("------------------------")
                     classifier = Classifier()
-                    classifier.SetTrainingAndTestData(MyHogParameters, MyColorParameters, MySpatialParameters, MyColorSpace, reprocess= True, storeData = False)
+                    classifier.SetFeatureProcessingParameters(MyHogParameters, MyColorParameters, MySpatialParameters, MyColorSpace)
+                    classifier.SetTrainingAndTestData(reprocess= True, storeData = False)
                     classifier.TrainClassifier()
-                    classifier.TestClassifier()      
+                    classifier.TestClassifier(False)      
                     print("------------------------")  
 
-
+#ExploreClassifiers()

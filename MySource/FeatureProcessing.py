@@ -10,6 +10,7 @@ from skimage.feature import hog
 from collections import namedtuple
 from DataHandling import DataHandling
 from sklearn.preprocessing import StandardScaler
+from DataAugmentation import *
 
 HogParameters = namedtuple("HogParameters", "isOn orientationsCount pixelsPerCell cellsPerBlock visualize channel")
 ColorParameters = namedtuple("ColorParameters", "isOn binCount")
@@ -27,10 +28,9 @@ class FeatureProcessing:
         self.spatialParameters = spatialParameters 
         self.colorSpace = colorSpace
         self.data = DataHandling()
-        self.normalizedFeatures= None
-        self.labels = None
         self.PrintParameters()
-    
+        self.scaler = None
+        
     def PrintParameters(self):
         print("Colorspace is ", self.colorSpace)
         for name, value in self.hogParameters._asdict().items():
@@ -42,31 +42,38 @@ class FeatureProcessing:
 
     
     def ComputeSpatialFeatures(self, featureImage):
-        features = cv2.resize(featureImage, self.spatialParameters.spatialSize).ravel()
+        features = []
+        if self.spatialParameters.isOn == True:
+            features = cv2.resize(featureImage, self.spatialParameters.spatialSize).ravel()
         return features
+        
     
     def ComputeColorHistogramFeatures(self, featureImage):
-        binsRange = (0,256)
-        binCount = self.colorParameters.binCount
+        features = []
+        if self.colorParameters.isOn == True:
+            binsRange = (0,256)
+            binCount = self.colorParameters.binCount
 
-        channel0 = np.histogram(featureImage[:,:,0], bins=binCount, range = binsRange) 
-        channel1 = np.histogram(featureImage[:,:,1], bins=binCount, range = binsRange)
-        channel2 = np.histogram(featureImage[:,:,2], bins=binCount, range = binsRange)
+            channel0 = np.histogram(featureImage[:,:,0], bins=binCount, range = binsRange) 
+            channel1 = np.histogram(featureImage[:,:,1], bins=binCount, range = binsRange)
+            channel2 = np.histogram(featureImage[:,:,2], bins=binCount, range = binsRange)
         
-        features = np.concatenate((channel0[0], channel1[0], channel2[0]))
+            features = np.concatenate((channel0[0], channel1[0], channel2[0]))
         return features
     
     
     def GetHogFeatures(self,featureImage):
-        pixelsPerCell = self.hogParameters.pixelsPerCell
-        cellsPerBlock = self.hogParameters.cellsPerBlock
-        orientationsCount = self.hogParameters.orientationsCount
-        visualize = self.hogParameters.visualize
-        featureVector = True
-        if(visualize):
-            features, hog_image = hog(featureImage, orientations=orientationsCount, pixels_per_cell=pixelsPerCell, cells_per_block=cellsPerBlock, transform_sqrt=True, visualise=visualize, feature_vector=featureVector)
-        else:
-            features = hog(featureImage, orientations=orientationsCount, pixels_per_cell=pixelsPerCell, cells_per_block=cellsPerBlock, transform_sqrt=True, visualise=visualize, feature_vector=featureVector)
+        features = []
+        if self.hogParameters.isOn == True:
+            pixelsPerCell = self.hogParameters.pixelsPerCell
+            cellsPerBlock = self.hogParameters.cellsPerBlock
+            orientationsCount = self.hogParameters.orientationsCount
+            visualize = self.hogParameters.visualize
+            featureVector = True
+            if(visualize):
+                features, hog_image = hog(featureImage, orientations=orientationsCount, pixels_per_cell=pixelsPerCell, cells_per_block=cellsPerBlock, transform_sqrt=True, visualise=visualize, feature_vector=featureVector)
+            else:
+                features = hog(featureImage, orientations=orientationsCount, pixels_per_cell=pixelsPerCell, cells_per_block=cellsPerBlock, transform_sqrt=True, visualise=visualize, feature_vector=featureVector)
             
         return features
 
@@ -99,6 +106,8 @@ class FeatureProcessing:
             featureImage = cv2.cvtColor(image, cv2.COLOR_BGR2RGB)
         elif(colorSpace == "HLS"):
             featureImage = cv2.cvtColor(image, cv2.COLOR_BGR2HLS)
+        elif(colorSpace == "YCrCb"):
+            featureImage = cv2.cvtColor(image, cv2.COLOR_BGR2YCrCb)
         
         return featureImage
     
@@ -119,12 +128,38 @@ class FeatureProcessing:
             
             features.append(np.concatenate((gradientFeatures, colorFeatures, spatialFeatures)))
         return features
-            
-    def NormalizeFeatures(self, features):
-        scaler = StandardScaler().fit(features)
-        return scaler.transform(features)
     
-    def Apply(self, image):
+    def ComputeFeatures2(self, imagesPathes, show=False, nonCar=False):
+        features = []
+        images = []
+        for imagePath in imagesPathes:
+            image = cv2.imread(imagePath)
+            images = images + [image]
+        
+        if(nonCar):    
+            print ("Before augmentation = ", len(images))
+            augmentation = DataAugmentation()
+            images = augmentation.DataAugmentation(images, 20000)
+            print ("After augmentation = ", len(images))
+        
+        for image in images:
+            if(show):
+                print(image.shape)
+                cv2.imshow('title',image)
+                cv2.waitKey(0)
+            colorImage = self.SetColorSpace(image, self.colorSpace)
+            spatialFeatures = self.ComputeSpatialFeatures(colorImage)
+            colorFeatures = self.ComputeColorHistogramFeatures(colorImage)
+            gradientFeatures = self.ComputeGradientFeatures(colorImage)
+            features.append(np.concatenate((gradientFeatures, colorFeatures, spatialFeatures)))
+        return features
+            
+    def NormalizeAllFeatures(self, features):
+        self.scaler = StandardScaler().fit(features)
+        return self.scaler.transform(features)
+    
+    
+    def Apply(self, image, scaler):
         features = []
         colorImage = self.SetColorSpace(image, self.colorSpace)
         
@@ -133,27 +168,42 @@ class FeatureProcessing:
         gradientFeatures = self.ComputeGradientFeatures(colorImage)
         
         features.append(np.concatenate((gradientFeatures, colorFeatures, spatialFeatures)))
-        return features
+        
+        normalizedFeatures = scaler.transform(features)
+        return normalizedFeatures
         
         
+    
     
     def ComputeAllFeaturesAndLabels(self, storeData = False):
         carData = self.data.GetCarData()
         nonCarData = self.data.GetNonCarData()
         
         
+#        carFeatures = self.ComputeFeatures2(carData, nonCar=False)
+#        nonCarFeatures = self.ComputeFeatures2(nonCarData, nonCar=True)
         carFeatures = self.ComputeFeatures(carData)
         nonCarFeatures = self.ComputeFeatures(nonCarData)
         
         allFeatures = np.vstack((carFeatures, nonCarFeatures)).astype(np.float64)
-        self.normalizedFeatures = self.NormalizeFeatures(allFeatures)
-        self.labels = np.hstack((np.ones(len(carFeatures)), np.zeros(len(nonCarFeatures))))
+        normalizedFeatures = self.NormalizeAllFeatures(allFeatures)
+        labels = np.hstack((np.ones(len(carFeatures)), np.zeros(len(nonCarFeatures))))
         
-        assert(len(self.labels) == len(self.normalizedFeatures))
+        assert(len(labels) == len(normalizedFeatures))
+        """
+        index = np.random.randint(0,1000)
+        imagePath = nonCarData[index]
+        image = cv2.imread(imagePath)
+        print("Shape:", image.shape)
+        print("Label:", labels[len(nonCarData)+index])
+        cv2.imshow('title',image)
+        if cv2.waitKey(500000) & 0xFF == ord('q'):
+            x=1
+        """
         if(storeData):
-            self.data.SavePreProcessedData(self.normalizedFeatures, self.labels)
+            self.data.SavePreProcessedData(normalizedFeatures, labels, self.scaler)
 
-        return self.normalizedFeatures, self.labels
+        return normalizedFeatures, labels, self.scaler
 
 
 #test = FeatureProcessing(DefaultHogParameters, DefaultColorParameters, DefaultSpatialParameters)
